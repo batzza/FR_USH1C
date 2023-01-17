@@ -21,6 +21,7 @@ hits <- GO_anno@sets[grep(paste(select_GO_terms,collapse="|"), names(GO_anno@set
 hits <- tibble(GO_term_ID = names(hits), gene_index = matrix(hits))          ## Get gene indices for each GO term
 hits <- hits %>% tidyr::unnest_longer(gene_index)                     ## Reorganize so each row has a gene/Go term pair
 hits$Uniprot_ID <- names(GO_anno@itemName2ItemIndex[hits$gene_index]) ## Add Uniprot gene IDs to tibble
+hits <- hits %>% dplyr::select(-gene_index)          ## Remove gene index (not meaningful outside this scropt context)
 
 ## Add gene info
 hits <- hits %>% inner_join(data.frame(Uniprot_ID = rownames(GO_anno@itemAnnotations), 
