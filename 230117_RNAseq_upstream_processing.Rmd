@@ -44,14 +44,14 @@ ord <- c(1:nm)
 ord.lvl <- unique(as.vector(expt.pheno))
 
 ## Remove outlier samples, if needed
-remove.samp <- c()
-#remove.samp <- c() #Remove a sample(s)
+remove.samp <- c(18) #Remove a sample(s)
 #ord.lvl <- c()  #Remove a level
 
 ## Make grp and export suffixes
 if (!is.null(remove.samp)){
   grp <- factor(expt.pheno[ord[-remove.samp]], levels = ord.lvl)
   ord <- ord[-remove.samp]
+  meta <- meta[-remove.samp,]
 } else{
   grp <- factor(expt.pheno[ord], levels = ord.lvl)
 }
@@ -122,8 +122,8 @@ names(files) <- paste0(meta$Group,"_",meta$Replicate)
 
 
 ## Remove files, if necessary
-#files <- files[-18]
-#meta <- meta[-18,]
+files <- files[-18]
+meta <- meta[-18,]
 
 ## Import trans data
 trans <- tximport(files, txOut=T, type = "kallisto", importer = read_tsv, tx2gene = NULL)

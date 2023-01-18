@@ -1,0 +1,161 @@
+---
+title: "USH1C Organoids - Differential Expression Analysis"
+output: html_notebook
+---
+
+#
+#### R Version
+Built with `r getRversion()`
+
+
+#### Load data
+```{r, echo=FALSE}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+load("data/processed/Processed_RNAseq.Rdata")
+```
+
+#### Set color scheme and breaks
+```{r, results="hide", fig.height = 1.5, fig.width = 1.5}
+library(RColorBrewer)
+
+# Cluster palette
+clust.pal <- brewer.pal(8, "Spectral")
+
+# Heatmap colors
+jet <- c("#7F0000","red","#FF7F00","yellow","white","cyan", "#007FFF", "blue","#00007F")
+colorsZ <- colorRampPalette(rev(jet))(1000)
+
+mb.col <- c("#023858","#3690c0","#e0f3f8","#fff7bc","#fec44f","#ec7014","#fc4e2a","#bd0026","#800026")
+colorsCPM <- colorRampPalette(mb.col)(n=1000)
+
+# Generate the breaks for the color scale
+col.breaksZ <- seq(-3, 3, length.out = 1001)
+col.breaksCPM <- seq(0,16,length = 1001)
+
+# Look at color assignments
+pie(x = rep(1,length(jet)), col = rev(jet), main = "Z-score Key", labels = seq(-3,3,0.75))
+pie(x = rep(1,length(mb.col)), col = mb.col, main = "CPM Key", labels = seq(0,16,2))
+
+```
+
+## Differential Expression Analysis
+
+### #Make the model matrix for analysis
+```{r}
+library(edgeR)
+
+# Set up ANOVA-like difference
+meta$Group <- as.factor(meta$Group)
+
+mod <- model.matrix(~0+meta$Group)
+colnames(mod) <- gsub("meta\\$", "", colnames(mod))
+colnames(mod) <- gsub("Group", "", colnames(mod))
+mod
+
+# Estimate dispersion
+gene.dge.filt <- estimateDisp(gene.dge.filt, mod)
+
+# Fit
+fit <- glmQLFit(gene.dge.filt, mod)
+colnames(fit)
+
+# Set desired individual contrasts
+conMatrix <- makeContrasts(
+  Control_v_Patient_D180 = Patient_D180 - Control_D180,
+  Control_v_Patient_D230 = Patient_D230 - Control_D230,
+  Control_v_Patient_D350 = Patient_D350 - Control_D350,
+  Control_v_Patient_all = ((Patient_D180 + Patient_D230 + Patient_D350)/3) - ((Control_D180 + Control_D230 + Control_D350)/3),
+  levels=mod)
+print("Matrix of examined contrasts")
+conMatrix
+
+
+```
+
+#
+####Perform differential expression 
+```{r}
+
+# Set chromosome list
+chrList <- c(1:22,"Y","X")
+
+# Set thresholds
+library(dplyr)
+fc <- 1
+fdr <- 0.05
+
+     
+## Run Quasi-likelihood F Tests for all comparisons
+qlf_Control_v_Patient_D180 <- glmQLFTest(fit, contrast = conMatrix[,"Control_v_Patient_D180"])
+qlf_Control_v_Patient_D230 <- glmQLFTest(fit, contrast = conMatrix[,"Control_v_Patient_D230"])
+qlf_Control_v_Patient_D350 <- glmQLFTest(fit, contrast = conMatrix[,"Control_v_Patient_D350"])
+qlf_Control_v_Patient_all <- glmQLFTest(fit, contrast = conMatrix[,"Control_v_Patient_all"])
+
+## Store all genes 
+DE <- c()
+DE$Control_v_Patient_D180 <- data.frame(topTags(qlf_Control_v_Patient_D180, n = Inf, p.value = 1, adjust.method = "BH", sort.by = "logFC")) %>% 
+  tibble::rownames_to_column("ensembl_ID")
+DE$Control_v_Patient_D230 <- data.frame(topTags(qlf_Control_v_Patient_D230, n = Inf, p.value = 1, adjust.method = "BH", sort.by = "logFC")) %>%
+  tibble::rownames_to_column("ensembl_ID")
+DE$Control_v_Patient_D350 <- data.frame(topTags(qlf_Control_v_Patient_D350, n = Inf, p.value = 1, adjust.method = "BH", sort.by = "logFC")) %>% 
+  tibble::rownames_to_column("ensembl_ID")
+DE$Control_v_Patient_all <- data.frame(topTags(qlf_Control_v_Patient_all, n = Inf, p.value = 1, adjust.method = "BH", sort.by = "logFC")) %>% 
+  tibble::rownames_to_column("ensembl_ID")
+
+## Store sig genes
+DE$Control_v_Patient_D180_sig <-data.frame(topTags(qlf_Control_v_Patient_D180, n = Inf, p.value = fdr, adjust.method = "BH", sort.by = "logFC")) %>% 
+  filter(abs(logFC) > fc) %>% 
+  filter(chromosome_name %in% chrList) %>% 
+  tibble::rownames_to_column("ensembl_ID")
+DE$Control_v_Patient_D230_sig <-data.frame(topTags(qlf_Control_v_Patient_D230, n = Inf, p.value = fdr, adjust.method = "BH", sort.by = "logFC")) %>% 
+  filter(abs(logFC) > fc) %>% 
+  filter(chromosome_name %in% chrList) %>% 
+  tibble::rownames_to_column("ensembl_ID")
+DE$Control_v_Patient_D350_sig <-data.frame(topTags(qlf_Control_v_Patient_D350, n = Inf, p.value = fdr, adjust.method = "BH", sort.by = "logFC")) %>% 
+  filter(abs(logFC) > fc) %>% 
+  filter(chromosome_name %in% chrList) %>% 
+  tibble::rownames_to_column("ensembl_ID")
+DE$Control_v_Patient_all_sig <-data.frame(topTags(qlf_Control_v_Patient_all, n = Inf, p.value = fdr, adjust.method = "BH", sort.by = "logFC")) %>% 
+  filter(abs(logFC) > fc) %>% 
+  filter(chromosome_name %in% chrList) %>% 
+  tibble::rownames_to_column("ensembl_ID")
+
+
+## Sig genes merged with CPM data
+cpm_table <- as.data.frame(gene.dge.filt$cpm)  %>% tibble::rownames_to_column("ensembl_ID")
+DE$Control_v_Patient_D180_sig_cpm <- DE$Control_v_Patient_D180_sig %>% left_join(cpm_table)
+DE$Control_v_Patient_D230_sig_cpm <- DE$Control_v_Patient_D230_sig %>% left_join(cpm_table)
+DE$Control_v_Patient_D350_sig_cpm <- DE$Control_v_Patient_D350_sig %>% left_join(cpm_table)
+DE$Control_v_Patient_all_sig_cpm <- DE$Control_v_Patient_all_sig %>% left_join(cpm_table)
+
+#Export Results
+write.csv(DE$Control_v_Patient_D180_sig_cpm, "data/processed/DEG_Control_v_Patient_D180.csv", row.names = TRUE)
+write.csv(DE$Control_v_Patient_D230_sig_cpm, "data/processed/DEG_Control_v_Patient_D230.csv", row.names = TRUE)
+write.csv(DE$Control_v_Patient_D350_sig_cpm, "data/processed/DEG_Control_v_Patient_D350.csv", row.names = TRUE)
+write.csv(DE$Control_v_Patient_all_sig_cpm, "data/processed/DEG_Control_v_Patient_all.csv", row.names = TRUE)
+```
+
+#
+##Cluster Analysis and Functional Gene Enrichment
+
+#
+####Average the data and get Z-score
+```{r}
+source("data/src/MBave.R")
+
+
+# Get the average log2 CPM expression per group for plotting
+gene.dge$ave <- MBave(dat = gene.dge$lcpm, grp = grp)
+gene.dge$cpm_ave <- MBave(dat = gene.dge$cpm, grp = grp)
+```
+
+
+```{r}
+# Get the averaged Z-score for the DE sig genes
+# gene.dge$aveZ <- t(scale(t(gene.dge$ave[DE$Control_v_NRL_L75Pfs_sig$ensembl_ID,]), center = T, scale = T))
+```
+
+```{r}
+save.image(file = "data/processed/Processed_RNAseq_w_CPM.Rdata")
+```
+
