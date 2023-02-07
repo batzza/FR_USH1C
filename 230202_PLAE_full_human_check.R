@@ -33,7 +33,7 @@ VlnPlot(scEiaD, features = features)
 DotPlot(scEiaD, features = features) + RotatedAxis()
 
 ## ID Muller Glia Cells
-mg_cells <- scEiaD@meta.data %>% filter(CellType_predict == "Muller Glia" & cluster %in% c(18,19,35,47)) %>% rownames()
+mg_cells <- scEiaD@meta.data %>% filter(CellType_predict == "Muller Glia") %>% rownames()
 
 ## Subset to MG cells
 mg_seurat <- subset(x=scEiaD, cells = mg_cells)
@@ -51,9 +51,10 @@ Idents(mg_seurat, WhichCells(object = mg_seurat, expression = ENSG00000006611 > 
 Idents(mg_seurat, WhichCells(object = mg_seurat, expression = ENSG00000006611 == 0, slot = 'data')) <- 'USH1C_negative'
 
 # Find differentially expressed features between between MG cells with and without USH1C
-ush1c_mg.de.markers <- FindMarkers(mg_seurat, ident.1 = "USH1C_positive", ident.2 = "USH1C_negative") %>% filter(p_val_adj < 0.05)
+ush1c_mg.de.markers <- FindMarkers(mg_seurat, ident.1 = "USH1C_positive", ident.2 = "USH1C_negative", only.pos = T) %>% filter(p_val_adj < 0.05)
+## ALL DIFFS ## ush1c_mg.de.markers <- FindMarkers(mg_seurat, ident.1 = "USH1C_positive", ident.2 = "USH1C_negative", min.diff.pct = 0.001, min.pct = 0.001, logfc.threshold = 0.001)
 
-markersPlot <- data.frame(ENSEMBL=ush1c_mg.de.markers %>% top_n(n = 67, wt = avg_log2FC) %>% rownames())
+markersPlot <- data.frame(ENSEMBL=ush1c_mg.de.markers %>% rownames())
 
 ## Change from row IDs to gene names
 annots <- select(org.Hs.eg.db, keys=markersPlot$ENSEMBL, 
@@ -63,3 +64,22 @@ annots <- annots %>% mutate(NAMES = coalesce(SYMBOL,ENSEMBL))
 
 ## Plot top markers
 DotPlot(mg_seurat, features = markersPlot) + RotatedAxis() + scale_x_discrete(labels=annots$NAMES)
+
+
+## Plot expression of two genes
+g1 <- "USH1C"
+g2 <- "CDH23"
+genes <- select(org.Hs.eg.db, keys=c(g1,g2), columns="ENSEMBL", keytype="SYMBOL")
+genes
+p <- FeaturePlot(object = mg_seurat, features = genes$ENSEMBL, blend = TRUE, combine =  FALSE, blend.threshold = 0.5)
+p[[1]] <- p[[1]] + xlim(7,11) +ylim(0,-6) +labs(title = genes[1,1]) + NoLegend()
+p[[2]] <- p[[2]] + xlim(7,11) +ylim(0,-6) +labs(title = genes[2,1]) + NoLegend()
+p[[3]] <- p[[3]] + xlim(7,11) +ylim(0,-6) +labs(title = "Combined") + NoLegend()
+cowplot::plot_grid(plotlist = p)
+
+## What percent of cells co-express genes
+## In USH1C Positive
+length(WhichCells(mg_seurat, expression = ENSG00000006611 == 0 & ENSG00000107736 > 0))/length(WhichCells(mg_seurat, expression = ENSG00000006611 == 0))
+
+# In USH1C Negative
+length(WhichCells(mg_seurat, expression = ENSG00000006611 > 0 & ENSG00000107736 > 0))/length(WhichCells(mg_seurat, expression = ENSG00000006611 > 0))

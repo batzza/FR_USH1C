@@ -46,7 +46,7 @@ Idents(mg_seurat, WhichCells(object = mg_seurat, expression = ENSG00000006611 > 
 Idents(mg_seurat, WhichCells(object = mg_seurat, expression = ENSG00000006611 == 0, slot = 'data')) <- 'USH1C_negative'
 
 # Find differentially expressed features between between MG cells with and without USH1C
-ush1c_mg.de.markers <- FindMarkers(mg_seurat, ident.1 = "USH1C_positive", ident.2 = "USH1C_negative", )
+ush1c_mg.de.markers <- FindMarkers(mg_seurat, ident.1 = "USH1C_positive", ident.2 = "USH1C_negative", min.diff.pct = 0.001, min.pct = 0.001, logfc.threshold = 0.001)
 
 markersPlot <- data.frame(ENSEMBL=ush1c_mg.de.markers %>% top_n(n = 50, wt = avg_log2FC) %>% rownames())
 

@@ -1,0 +1,236 @@
+---
+title: "USH1C Organoids -- external data -- Lin 2019 PMID:31652328"
+output: html_notebook
+---
+#
+#####R Version
+Built with
+`r getRversion()`
+
+```{python, echo = TRUE}
+
+import json
+import glob
+samples = glob.glob('data/external/GSE124532/*')
+
+kal = json.loads(open(samples[1] + '/run_info.json').read())
+ens_ver = kal['call'].split("/")[5]
+
+print('This analysis was performed using the Ensembl annotation version: ' + ens_ver)
+print('The transcript-level quantitation was performed using kallisto version: ' + kal["kallisto_version"])
+print('Gene-level summarization was performed using tximport with the "lengthScaledTPM" option.')
+```
+Here is a hyperlink to [kallisto](https://pachterlab.github.io/kallisto/). 
+A description of the output files can be found at the bottom of the notebook.
+
+##Project Information
+
+####Get meta file
+```{r}
+meta <- read.csv("data/external/GSE124532/meta.csv", stringsAsFactors = F)
+meta
+```
+
+#
+####Experiment sample details - Eliminate samples/levels if needed
+```{r, results="hide"}
+## Number of samples and levels
+nm <- dim(meta)[1]
+expt.pheno <- factor(meta$Treatment)
+nm.lvl <- length(levels(expt.pheno))
+
+## Order of samples
+ord <- c(1:nm)
+ord.lvl <- unique(as.vector(expt.pheno))
+
+## Remove outlier samples, if needed
+remove.samp <- c() #Remove a sample(s)
+#ord.lvl <- c()  #Remove a level
+
+## Make grp and export suffixes
+if (!is.null(remove.samp)){
+  grp <- factor(expt.pheno[ord[-remove.samp]], levels = ord.lvl)
+  ord <- ord[-remove.samp]
+  meta <- meta[-remove.samp,]
+} else{
+  grp <- factor(expt.pheno[ord], levels = ord.lvl)
+}
+
+meta$Group <- meta$Treatment
+
+```
+
+
+## Project Essentials
+
+#### Get transcript and gene annotation
+```{r}
+# Get annotation
+# source("data/src/ENSannotDownload_v0.2.0.R")
+
+# Import annotation
+annot.gene <- read.csv(file = "data/external/Mm_ENS102_GeneAnnot.tsv", sep="\t", row.names = 1)
+annot.trans <- read.csv(file = "data/external/Mm_ENS102_TransAnnot.tsv", sep="\t", row.names = 1)
+
+# Create tx2gene needed for tximport
+tx2gene <- data.frame(cbind(as.character(row.names(annot.trans)), as.character(annot.trans$ensembl_gene_id)))
+
+```
+
+
+#### Set color scheme and breaks
+```{r, results="hide"}
+library(RColorBrewer)
+## Sample colors
+label.col <- c("#61ADF1","#FFE186","#10518A","#F7B906","#082640", "#f76a06")
+
+## Sample color palette
+colorsSampPal <- colorRampPalette(label.col)(nm.lvl)
+
+## Assign colors to samples based on grp
+colorsSamp <- colorsSampPal[grp]
+
+# if (!is.null(remove.samp)){
+#   colorsSamp <- colorsSamp[-remove.samp]
+# } else{
+#   colorsSamp <- colorsSamp
+# }
+
+## Heatmap colors
+jet <- c("#7F0000","red","#FF7F00","yellow","white","cyan", "#007FFF", "blue","#00007F")
+
+## Alignment plot colors
+colorsAlign <- brewer.pal(3, "Spectral")
+
+## Look at color assignments
+pie(x = rep(1,nm.lvl), col = colorsSampPal, main = "Sample Group", labels = levels(grp))
+```
+
+
+## Import Data
+
+#### Import kallisto data and summarize to gene-level
+```{r, results="hide"}
+library(tximport)
+library(readr)
+
+# kallisto results location
+wd <- "data/external/GSE124532"
+samples <- dir(path=wd, pattern="S.+")
+files <- file.path(wd, samples, "abundance.h5")
+names(files) <- paste0(meta$Group,"_",meta$Replicate)
+
+
+## Remove files, if necessary
+#files <- files[-18]
+#meta <- meta[-18,]
+
+## Import trans data
+trans <- tximport(files, txOut=T, type = "kallisto", importer = read_tsv, tx2gene = NULL)
+rnames <- gsub("(.+)\\..+", "\\1", row.names(trans$abundance), perl=T)
+row.names(trans$abundance) <- rnames
+row.names(trans$counts) <- rnames
+row.names(trans$length) <- rnames
+
+## Summarize to gene
+gene <- summarizeToGene(trans, tx2gene, countsFromAbundance = "lengthScaledTPM")
+```
+
+
+#### TMM Normalize the data
+```{r}
+library(edgeR)
+
+#Transcript-level normalization
+trans.dge <- DGEList(trans$counts[,ord], group = grp, genes = annot.trans[row.names(trans$counts),])
+trans.dge <- calcNormFactors(trans.dge)
+trans.dge$rpkm <- rpkm(trans.dge, gene.length = "transcript_length")
+trans.dge$lrpkm <- log2(trans.dge$rpkm + 1)
+
+#Gene-level normalization
+gene.dge <- DGEList(gene$counts[,ord], group = grp, genes = annot.gene[row.names(gene$counts),])
+gene.dge <- calcNormFactors(gene.dge)
+gene.dge$cpm <- cpm(gene.dge)
+gene.dge$lcpm <- log2(gene.dge$cpm + 1)
+gene.dge$ltpm <- log2(gene$abundance[,ord] + 1)
+
+#View the data frames
+trans.dge$rpkm[1:6, 1:5]
+gene.dge$cpm[1:6, 1:5]
+```
+
+
+## Export Interim and Final Data
+
+#### Export TMM transcript and gene level data using all genes
+```{r, results="hide"}
+#Export raw kallisto outputs
+write.table(trans$counts, file="data/interim/Lin_2019_Trans_Counts_raw.tsv", quote=F, sep="\t", col.names = NA)
+write.table(trans$abundance, file="data/interim/Lin_2019_Trans_TPM_raw.tsv", quote=F, sep="\t", col.names = NA)
+write.table(trans$length, file="data/interim/Lin_2019_Trans_EffLength_raw.tsv", quote=F, sep="\t", col.names = NA)
+
+write.table(gene$counts, file="data/interim/Lin_2019_Gene_Counts_raw.tsv", quote=F, sep="\t", col.names = NA)
+write.table(gene$abundance, file="data/interim/GLin_2019_ene_TPM_raw.tsv", quote=F, sep="\t", col.names = NA)
+write.table(gene$length, file="data/interim/Lin_2019_Gene_EffLength_raw.tsv", quote=F, sep="\t", col.names = NA)
+
+
+#Export transcript tables
+write.table(data.frame(merge(trans.dge$genes, trans.dge$rpkm, by=0), row.names=1), 
+            file="data/processed/Lin_2019_Trans_RPKM_MSTR.tsv", quote=F, sep="\t", col.names = NA)
+write.table(data.frame(merge(trans.dge$genes, trans.dge$lrpkm, by=0), row.names=1), 
+            file="data/processed/Lin_2019_Trans_log2RPKM_MSTR.tsv", quote=F, sep="\t", col.names = NA)
+
+
+#Export gene tables
+write.table(data.frame(merge(annot.gene, gene.dge$cpm, by=0), row.names=1), 
+            file="data/processed/Lin_2019_Gene_CPM_MSTR.tsv", quote=F, sep="\t", col.names = NA)
+write.table(data.frame(merge(annot.gene, gene.dge$lcpm, by=0), row.names=1), 
+            file="data/processed/Lin_2019_Gene_log2CPM_MSTR.tsv", quote=F, sep="\t", col.names = NA)
+
+```
+
+
+#### Perform expression filtered normalization and export final data
+```{r}
+source("data/src/filterFPKM_v1.R")
+
+#Expression level for gene filtering
+exprlvl = 1
+
+#Filter data for those expressed
+filterFPKM(as.data.frame(gene.dge$counts), grp, exp = exprlvl)
+
+#Perform normalization for DE
+gene.dge.filt <- gene.dge[idx.filt, , keep.lib.sizes=FALSE]
+gene.dge.filt <- calcNormFactors(gene.dge.filt)
+gene.dge.filt$cpm <- cpm(gene.dge.filt, log=F)
+gene.dge.filt$lcpm <- log2(gene.dge.filt$cpm + 1)
+
+#Export the normalized filtered CPM values
+write.table(data.frame(merge(gene.dge.filt$genes, gene.dge.filt$cpm, by = 0), row.names = 1), 
+            file=paste0("data/processed/Lin_2019_Gene_filtCPM_MSTR_", exprlvl, "CPM.tsv"), 
+            quote=F, sep="\t", col.names = NA)
+
+#Export the normalized filtered logCPM values
+write.table(data.frame(merge(gene.dge.filt$genes, gene.dge.filt$lcpm, by = 0), row.names = 1), 
+            file=paste0("data/processed/Lin_2019_Gene_filtlog2CPM_MSTR_", exprlvl, "CPM.tsv"), 
+            quote=F, sep="\t", col.names = NA)
+
+print(paste0("Number of genes after filtering for ", exprlvl, " CPM: ", dim(gene.dge.filt)[1]))
+```
+
+
+```{r}
+save.image("data/processed/Lin_2019_Processed_RNAseq.Rdata")
+```
+
+
+
+
+
+
+
+
+
+
+
